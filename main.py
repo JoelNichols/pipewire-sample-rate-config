@@ -1,56 +1,108 @@
 #!/usr/bin/env python
 
-import tkinter as tk
+import sys
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QComboBox, QMessageBox
 import subprocess
 
 
-class Application(object):
+class Application(QWidget):
     def __init__(self):
-        self.SAMPLE_RATES = (44100, 48000, 88200, 96000)
-        self.BUFFER_SIZES = (32, 64, 128, 256, 512, 1024)
-        self.window = Window(self)
-        self.window.mainloop()
-
-    def read(self, prop):
-        setting = subprocess.check_output(f"pw-metadata -n settings 0 clock.force-{prop}", shell=True)
-        value = setting.decode("UTF-8").split("value:'")[1].split("' type:")[0]
-        return value
-
-    def change(self, value, prop):
-        subprocess.run(f"pw-metadata -n settings 0 clock.force-{prop} {value}", shell=True)
-        if prop == "rate":
-            self.window.message.config(text=f"Current sample rate: {self.read(prop)}")
-        elif prop == "quantum":
-            self.window.message2.config(text=f"Current buffer size: {self.read(prop)}")
-        self.window.update()
-
-
-class Window(tk.Tk):
-    def __init__(self, file):
         super().__init__()
 
-        self.title("Pipewire Sample Rate Settings")
-        self.geometry("500x200")
-        self["bg"] = "#2E3440"
-        self.resizable(False, False)
+        self.SAMPLE_RATES = (44100, 48000, 88200, 96000)
+        self.BUFFER_SIZES = (32, 64, 128, 256, 512, 1024)
 
-        self.message = tk.Label(master=self, text=f"Current sample rate: {file.read('rate')}", fg="#ECEFF4", bg="#2E3440")
-        self.message.pack(side=tk.TOP, pady=10)
-        self.layout = tk.Frame(master=self, bg="#2E3440")
-        self.layout.pack(side=tk.TOP, pady=10)
-        for i in file.SAMPLE_RATES:
-            button = tk.Button(master=self.layout, text=str(i), fg="#ECEFF4", bg="#2E3440", cursor="hand2", borderwidth=2, bd=2, relief=tk.RAISED, activebackground="#434C5E", activeforeground="#ECEFF4",
-                               command=lambda x=i: file.change(x, "rate"))
-            button.pack(side=tk.LEFT, padx=10)
-        self.message2 = tk.Label(master=self, text=f"Current buffer size: {file.read('quantum')}", fg="#ECEFF4", bg="#2E3440")
-        self.message2.pack(side=tk.TOP, pady=10)
-        self.layout2 = tk.Frame(master=self, bg="#2E3440")
-        self.layout2.pack(side=tk.TOP, pady=10)
-        for i in file.BUFFER_SIZES:
-            button = tk.Button(master=self.layout2, text=str(i), fg="#ECEFF4", bg="#2E3440", cursor="hand2", borderwidth=2, bd=2, relief=tk.RAISED, activebackground="#434C5E", activeforeground="#ECEFF4",
-                               command=lambda x=i: file.change(x, "quantum"))
-            button.pack(side=tk.LEFT, padx=10)
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('Pipewire Sample Rate Settings')
+        self.setGeometry(100, 100, 350, 200)
+
+        layout = QVBoxLayout()
+
+        self.message = QLabel("Sample Rate")
+        layout.addWidget(self.message)
+
+        self.sampleRateComboBox = QComboBox()
+        self.updateSampleRates()
+
+        # Set current sample rate or indicate unknown
+        current_rate = self.read('rate')
+        if current_rate == "Unknown":
+            self.sampleRateComboBox.addItem(current_rate)
+            self.sampleRateComboBox.setCurrentIndex(self.sampleRateComboBox.findText(current_rate))
+        else:
+            current_rate_index = self.sampleRateComboBox.findText(current_rate)
+            if current_rate_index >= 0:
+                self.sampleRateComboBox.setCurrentIndex(current_rate_index)
+        self.sampleRateComboBox.currentIndexChanged.connect(self.onSampleRateChanged)
+        layout.addWidget(self.sampleRateComboBox)
+
+        self.message2 = QLabel("Buffer Size")
+        layout.addWidget(self.message2)
+
+        self.bufferSizeComboBox = QComboBox()
+        self.bufferSizeComboBox.addItems([str(size) for size in self.BUFFER_SIZES])
+
+        # Set current buffer size or indicate unknown
+        current_buffer_size = self.read('quantum')
+        if current_buffer_size == "Unknown":
+            self.bufferSizeComboBox.addItem(current_buffer_size)
+            self.bufferSizeComboBox.setCurrentIndex(self.bufferSizeComboBox.findText(current_buffer_size))
+        else:
+            current_buffer_size_index = self.bufferSizeComboBox.findText(current_buffer_size)
+            if current_buffer_size_index >= 0:
+                self.bufferSizeComboBox.setCurrentIndex(current_buffer_size_index)
+        self.bufferSizeComboBox.currentIndexChanged.connect(self.onBufferSizeChanged)
+        layout.addWidget(self.bufferSizeComboBox)
+
+        self.setLayout(layout)
+
+    def updateSampleRates(self):
+        supported_rates = self.detectSupportedSampleRates()
+        self.sampleRateComboBox.clear()
+        self.sampleRateComboBox.addItems([str(rate) for rate in supported_rates])
+
+    def detectSupportedSampleRates(self):
+        return self.SAMPLE_RATES
+
+    def onSampleRateChanged(self, index):
+        rate = self.sampleRateComboBox.currentText()
+        if rate.isdigit():
+            self.change(rate, 'rate')
+            unknown_index = self.sampleRateComboBox.findText("Unknown")
+            if unknown_index >= 0:
+                self.sampleRateComboBox.removeItem(unknown_index)
+
+    def onBufferSizeChanged(self, index):
+        size = self.bufferSizeComboBox.currentText()
+        if size.isdigit():
+            self.change(size, 'quantum')
+
+            unknown_index = self.bufferSizeComboBox.findText("Unknown")
+            if unknown_index >= 0:
+                self.bufferSizeComboBox.removeItem(unknown_index)
+
+    def read(self, prop):
+        try:
+            setting = subprocess.check_output(["pw-metadata", "-n", "settings", "0", f"clock.force-{prop}"])
+            value = setting.decode("UTF-8").split("value:'")[1].split("' type:")[0]
+            return value
+        except subprocess.CalledProcessError:
+            return "Unknown"
+
+    def change(self, value, prop):
+        try:
+            subprocess.run(["pw-metadata", "-n", "settings", "0", f"clock.force-{prop}", str(value)], check=True)
+        except subprocess.CalledProcessError:
+            self.showErrorMessage(f"Failed to update {prop}")
+
+    def showErrorMessage(self, message):
+        QMessageBox.critical(self, "Update Failed", message)
 
 
-if __name__ == "__main__":
-    app = Application()
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    ex = Application()
+    ex.show()
+    sys.exit(app.exec())
