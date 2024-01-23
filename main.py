@@ -20,6 +20,9 @@ class Application(QWidget):
 
         layout = QVBoxLayout()
 
+        layout.addWidget(QLabel('Current Audio Interface'))
+        layout.addWidget(QLabel(self.getCurrentAudioInterface()))
+
         self.message = QLabel("Sample Rate")
         layout.addWidget(self.message)
 
@@ -57,6 +60,52 @@ class Application(QWidget):
         layout.addWidget(self.bufferSizeComboBox)
 
         self.setLayout(layout)
+
+    def getCurrentAudioInterface(self):
+        try:
+            sinks = subprocess.check_output(["pactl", "list", "sinks"]).decode("utf-8")
+            active_sink = None
+            current_sink = None
+            for line in sinks.split('\n'):
+                if "State: RUNNING" in line and current_sink is not None:
+                    active_sink = current_sink
+                    break
+                elif line.startswith("Sink #"):
+                    current_sink = line.split('#')[1].strip()
+            if active_sink is not None:
+                sink_info = subprocess.check_output(["pactl", "list", "sinks"]).decode("utf-8")
+                sink_section = False
+                for line in sink_info.split('\n'):
+                    if line.startswith(f"Sink #{active_sink}"):
+                        sink_section = True
+                    elif line.startswith("Sink #") and sink_section:
+                        break
+                    elif sink_section and line.strip().startswith("Name:"):
+                        full_name = line.split(' ')[1].strip()
+                        # Simplify the interface name
+                        simplified_name = self.simplifyInterfaceName(full_name)
+                        return simplified_name
+            return "Unknown"
+        except subprocess.CalledProcessError:
+            return "Unknown"
+
+    def simplifyInterfaceName(self, full_name):
+        parts = full_name.replace('.', '_').split('_')
+
+        relevant_parts = []
+        for part in parts:
+            if part.lower() in ["alsa", "usb", "output", "input", "sink", "source", "audio", "card", "device",
+                                "multichannel", "00"]:
+                continue
+            # Exclude likely serial numbers or similar identifiers
+            if any(char.isdigit() for char in part):
+                continue
+            relevant_parts.append(part)
+
+        simplified_name = ' '.join(relevant_parts)
+
+        # Return the simplified name, or a generic label if it's empty
+        return simplified_name if simplified_name else "Audio Interface"
 
     def updateSampleRates(self):
         supported_rates = self.detectSupportedSampleRates()
