@@ -1,108 +1,136 @@
 #!/usr/bin/env python
 
 import sys
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QComboBox, QMessageBox
 import subprocess
+import gi
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk, Gio, GLib
 
-
-class Application(QWidget):
+class Application(Gtk.Window):
     def __init__(self):
         super().__init__()
 
         self.SAMPLE_RATES = (44100, 48000, 88200, 96000)
         self.BUFFER_SIZES = (32, 64, 128, 256, 512, 1024)
 
-        self.initUI()
+        self.set_title("Pipewire Sample Rate Settings")
+        self.set_default_size(350, 200)
 
-    def initUI(self):
-        self.setWindowTitle('Pipewire Sample Rate Settings')
-        self.setGeometry(100, 100, 350, 200)
+        self.init_ui()
 
-        layout = QVBoxLayout()
+    def init_ui(self):
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        vbox.set_margin_top(20)
+        vbox.set_margin_bottom(20)
+        vbox.set_margin_start(20)
+        vbox.set_margin_end(20)
+        self.set_child(vbox)
 
-        self.message = QLabel("Sample Rate")
-        layout.addWidget(self.message)
+        message = Gtk.Label(label="Sample Rate")
+        vbox.append(message)
 
-        self.sampleRateComboBox = QComboBox()
-        self.updateSampleRates()
+        self.sample_rate_combo_box = Gtk.ComboBoxText()
+        self.update_sample_rates()
+        vbox.append(self.sample_rate_combo_box)
 
-        # Set current sample rate or indicate unknown
-        current_rate = self.read('rate')
-        if current_rate == "Unknown":
-            self.sampleRateComboBox.addItem(current_rate)
-            self.sampleRateComboBox.setCurrentIndex(self.sampleRateComboBox.findText(current_rate))
-        else:
-            current_rate_index = self.sampleRateComboBox.findText(current_rate)
-            if current_rate_index >= 0:
-                self.sampleRateComboBox.setCurrentIndex(current_rate_index)
-        self.sampleRateComboBox.currentIndexChanged.connect(self.onSampleRateChanged)
-        layout.addWidget(self.sampleRateComboBox)
+        message2 = Gtk.Label(label="Buffer Size")
+        vbox.append(message2)
 
-        self.message2 = QLabel("Buffer Size")
-        layout.addWidget(self.message2)
+        self.buffer_size_combo_box = Gtk.ComboBoxText()
+        self.update_buffer_sizes()
+        vbox.append(self.buffer_size_combo_box)
 
-        self.bufferSizeComboBox = QComboBox()
-        self.bufferSizeComboBox.addItems([str(size) for size in self.BUFFER_SIZES])
+    def update_sample_rates(self):
+        supported_rates = self.detect_supported_sample_rates()
+        self.sample_rate_combo_box.append_text("Default")
+        for rate in supported_rates:
+            self.sample_rate_combo_box.append_text(str(rate))
 
-        # Set current buffer size or indicate unknown
-        current_buffer_size = self.read('quantum')
-        if current_buffer_size == "Unknown":
-            self.bufferSizeComboBox.addItem(current_buffer_size)
-            self.bufferSizeComboBox.setCurrentIndex(self.bufferSizeComboBox.findText(current_buffer_size))
-        else:
-            current_buffer_size_index = self.bufferSizeComboBox.findText(current_buffer_size)
-            if current_buffer_size_index >= 0:
-                self.bufferSizeComboBox.setCurrentIndex(current_buffer_size_index)
-        self.bufferSizeComboBox.currentIndexChanged.connect(self.onBufferSizeChanged)
-        layout.addWidget(self.bufferSizeComboBox)
+        current_rate = self.read("rate")
+        index = self.get_index_in_combo(self.sample_rate_combo_box, current_rate)
+        if index == -1 and current_rate.isdigit() and current_rate != "0":
+            self.sample_rate_combo_box.append_text(current_rate)
+            index = self.get_index_in_combo(self.sample_rate_combo_box, current_rate)
+        self.sample_rate_combo_box.set_active(index)
+        self.sample_rate_combo_box.connect("changed", self.on_sample_rate_changed)
 
-        self.setLayout(layout)
+    def update_buffer_sizes(self):
+        for size in self.BUFFER_SIZES:
+            self.buffer_size_combo_box.append_text(str(size))
 
-    def updateSampleRates(self):
-        supported_rates = self.detectSupportedSampleRates()
-        self.sampleRateComboBox.clear()
-        self.sampleRateComboBox.addItems([str(rate) for rate in supported_rates])
+        current_buffer_size = self.read("quantum")
+        # Fallback to the first size if the current size is invalid or not set
+        if current_buffer_size == "0" or not current_buffer_size.isdigit():
+            current_buffer_size = str(self.BUFFER_SIZES[0])  # Choose a sensible fallback
+        index = self.get_index_in_combo(self.buffer_size_combo_box, current_buffer_size)
+        if index == -1:
+            self.buffer_size_combo_box.append_text(current_buffer_size)
+            index = self.get_index_in_combo(self.buffer_size_combo_box, current_buffer_size)
+        self.buffer_size_combo_box.set_active(index)
+        self.buffer_size_combo_box.connect("changed", self.on_buffer_size_changed)
 
-    def detectSupportedSampleRates(self):
+    def detect_supported_sample_rates(self):
         return self.SAMPLE_RATES
 
-    def onSampleRateChanged(self, index):
-        rate = self.sampleRateComboBox.currentText()
-        if rate.isdigit():
-            self.change(rate, 'rate')
-            unknown_index = self.sampleRateComboBox.findText("Unknown")
-            if unknown_index >= 0:
-                self.sampleRateComboBox.removeItem(unknown_index)
+    def on_sample_rate_changed(self, combo):
+        rate = combo.get_active_text()
+        if rate == "Default":
+            self.remove_setting("rate")
+        elif rate.isdigit():
+            self.change(rate, "rate")
 
-    def onBufferSizeChanged(self, index):
-        size = self.bufferSizeComboBox.currentText()
+    def on_buffer_size_changed(self, combo):
+        size = combo.get_active_text()
         if size.isdigit():
-            self.change(size, 'quantum')
-
-            unknown_index = self.bufferSizeComboBox.findText("Unknown")
-            if unknown_index >= 0:
-                self.bufferSizeComboBox.removeItem(unknown_index)
+            self.change(size, "quantum")
 
     def read(self, prop):
         try:
             setting = subprocess.check_output(["pw-metadata", "-n", "settings", "0", f"clock.force-{prop}"])
             value = setting.decode("UTF-8").split("value:'")[1].split("' type:")[0]
+            if value == "0":  # If the value is 0, treat it as an invalid setting
+                return "Default" if prop == "rate" else str(self.BUFFER_SIZES[0])
             return value
         except subprocess.CalledProcessError:
-            return "Unknown"
+            return "Default" if prop == "rate" else str(self.BUFFER_SIZES[0])
 
     def change(self, value, prop):
         try:
             subprocess.run(["pw-metadata", "-n", "settings", "0", f"clock.force-{prop}", str(value)], check=True)
         except subprocess.CalledProcessError:
-            self.showErrorMessage(f"Failed to update {prop}")
+            self.show_error_message(f"Failed to update {prop}")
 
-    def showErrorMessage(self, message):
-        QMessageBox.critical(self, "Update Failed", message)
+    def remove_setting(self, prop):
+        try:
+            subprocess.run(["pw-metadata", "-n", "settings", "-r", "0", f"clock.force-{prop}"], check=True)
+        except subprocess.CalledProcessError:
+            self.show_error_message(f"Failed to remove {prop} setting")
 
+    def show_error_message(self, message):
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.CLOSE,
+            text="Update Failed",
+        )
+        dialog.format_secondary_text(message)
+        dialog.run()
+        dialog.destroy()
+
+    def get_index_in_combo(self, combo, text):
+        model = combo.get_model()
+        for i, row in enumerate(model):
+            if row[0] == text:
+                return i
+        return -1
+
+def on_activate(app):
+    win = Application()
+    app.add_window(win)
+    win.show()
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    ex = Application()
-    ex.show()
-    sys.exit(app.exec())
+    app = Gtk.Application(application_id="com.example.PipewireSettings")
+    app.connect("activate", on_activate)
+    app.run(sys.argv)

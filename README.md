@@ -2,7 +2,7 @@
 
 Forked from https://github.com/cyber-sushi/pipewire-sample-rate-config.
 
-This fork uses PySide6 for the UI which looks a bit nicer on KDE.
+This fork uses GTK for the GUI instead of Tkinter.
 
 Original description
 ---
